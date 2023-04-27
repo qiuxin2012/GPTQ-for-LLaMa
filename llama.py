@@ -97,7 +97,7 @@ def llama_sequential(model, dataloader, dev):
                 gptq[name] = GPTQ(subset[name], observe=args.observe)
                 gptq[name].quantizer.configure(args.wbits, perchannel=True, sym=args.sym, mse=False)
 
-            print("1.1:" + str(time.time() - s1))
+            print("1.1:" + str(time.time() - s1)) # 0.005s / 141.4s
             def add_batch(name):
 
                 def tmp(_, inp, out):
@@ -113,7 +113,7 @@ def llama_sequential(model, dataloader, dev):
             for h in handles:
                 h.remove()
 
-            print("2:" + str(time.time() - s1))
+            print("2:" + str(time.time() - s1)) # 25.5s + 22.79s + 24.41s + 30.17s (102.87s) / 141.4s
             for name in subset:
                 scale, zero, g_idx, error = gptq[name].fasterquant(percdamp=args.percdamp, groupsize=args.groupsize, actorder=args.act_order, name=name)
                 quantizers['model.layers.%d.%s' % (i, name)] = (gptq[name].quantizer.cpu(), scale.cpu(), zero.cpu(), g_idx.cpu(), args.wbits, args.groupsize)
@@ -122,13 +122,12 @@ def llama_sequential(model, dataloader, dev):
                     observer.submit(name=name, layerid=i, gptq=gptq[name], error=error)
                 else:
                     gptq[name].free()
-                print("3:" + str(time.time() - s1))
-
-        print("4:" + str(time.time() - s1))
+                print("3:" + str(time.time() - s1)) # 4.34s + 1.46s + 6.21s + 4.86s (12.12s) / 141.4s
+        print("4:" + str(time.time() - s1)) 
         for j in range(args.nsamples):
             outs[j] = layer(inps[j].unsqueeze(0), attention_mask=attention_mask, position_ids=position_ids)[0]
 
-        print("5:" + str(time.time() - s1))
+        print("5:" + str(time.time() - s1)) # 21.59s / 141.4s
         layers[i] = layer.cpu()
         del layer
         del gptq 
