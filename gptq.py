@@ -8,8 +8,8 @@ import quant
 from texttable import Texttable
 from utils import torch_snr_error
 
-torch.backends.cuda.matmul.allow_tf32 = False
-torch.backends.cudnn.allow_tf32 = False
+# torch.backends.cuda.matmul.allow_tf32 = False
+# torch.backends.cudnn.allow_tf32 = False
 
 
 class Observer:
@@ -204,7 +204,7 @@ class GPTQ:
 
             W[:, i2:] -= Err1.matmul(Hinv[i1:i2, i2:])
 
-        torch.cuda.synchronize()
+        # torch.cuda.synchronize()
         error = torch.sum(Losses).item()
 
         groupsize = groupsize if groupsize != -1 else self.columns
@@ -233,4 +233,4 @@ class GPTQ:
         self.H = None
         self.Losses = None
         self.Trace = None
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()

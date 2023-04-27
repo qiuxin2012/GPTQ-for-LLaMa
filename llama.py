@@ -64,7 +64,7 @@ def llama_sequential(model, dataloader, dev):
     layers[0] = layers[0].cpu()
     model.model.embed_tokens = model.model.embed_tokens.cpu()
     model.model.norm = model.model.norm.cpu()
-    torch.cuda.empty_cache()
+    # torch.cuda.empty_cache()
 
     outs = torch.zeros_like(inps)
     attention_mask = cache['attention_mask']
@@ -72,6 +72,7 @@ def llama_sequential(model, dataloader, dev):
 
     print('Ready.')
 
+    import time
     quantizers = {}
     observer = Observer()
     for i in range(len(layers)):
@@ -80,7 +81,7 @@ def llama_sequential(model, dataloader, dev):
         print('+------------------+--------------+------------+-----------+-------+')
         print('|       name       | weight_error | fp_inp_SNR | q_inp_SNR | time  |')
         print('+==================+==============+============+===========+=======+')
-
+        s1 = time.time()
         layer = layers[i].to(dev)
         full = find_layers(layer)
         if args.true_sequential:
@@ -88,6 +89,7 @@ def llama_sequential(model, dataloader, dev):
         else:
             sequential = [list(full.keys())]
 
+        print("1:" + str(time.time() - s1))
         for names in sequential:
             subset = {n: full[n] for n in names}
             gptq = {}
@@ -95,6 +97,7 @@ def llama_sequential(model, dataloader, dev):
                 gptq[name] = GPTQ(subset[name], observe=args.observe)
                 gptq[name].quantizer.configure(args.wbits, perchannel=True, sym=args.sym, mse=False)
 
+            print("1.1:" + str(time.time() - s1))
             def add_batch(name):
 
                 def tmp(_, inp, out):
@@ -110,6 +113,7 @@ def llama_sequential(model, dataloader, dev):
             for h in handles:
                 h.remove()
 
+            print("2:" + str(time.time() - s1))
             for name in subset:
                 scale, zero, g_idx, error = gptq[name].fasterquant(percdamp=args.percdamp, groupsize=args.groupsize, actorder=args.act_order, name=name)
                 quantizers['model.layers.%d.%s' % (i, name)] = (gptq[name].quantizer.cpu(), scale.cpu(), zero.cpu(), g_idx.cpu(), args.wbits, args.groupsize)
@@ -118,16 +122,20 @@ def llama_sequential(model, dataloader, dev):
                     observer.submit(name=name, layerid=i, gptq=gptq[name], error=error)
                 else:
                     gptq[name].free()
+                print("3:" + str(time.time() - s1))
 
+        print("4:" + str(time.time() - s1))
         for j in range(args.nsamples):
             outs[j] = layer(inps[j].unsqueeze(0), attention_mask=attention_mask, position_ids=position_ids)[0]
 
+        print("5:" + str(time.time() - s1))
         layers[i] = layer.cpu()
         del layer
-        del gptq
-        torch.cuda.empty_cache()
+        del gptq 
+        # torch.cuda.empty_cache()
 
         inps, outs = outs, inps
+        print("6:" + str(time.time() - s1))
         print('+------------------+--------------+------------+-----------+-------+')
         print('\n')
 
@@ -212,7 +220,7 @@ def llama_eval(model, testenc, dev):
 
     layers[0] = layers[0].cpu()
     model.model.embed_tokens = model.model.embed_tokens.cpu()
-    torch.cuda.empty_cache()
+    # torch.cuda.empty_cache()
 
     outs = torch.zeros_like(inps)
     attention_mask = cache['attention_mask']
@@ -235,7 +243,7 @@ def llama_eval(model, testenc, dev):
             outs[j] = layer(inps[j].unsqueeze(0), attention_mask=attention_mask, position_ids=position_ids)[0]
         layers[i] = layer.cpu()
         del layer
-        torch.cuda.empty_cache()
+        # torch.cuda.empty_cache()
         inps, outs = outs, inps
 
     if model.model.norm is not None:
@@ -360,7 +368,7 @@ def llama_multigpu(model, gpus):
 
 def benchmark(model, input_ids, check=False):
     input_ids = input_ids.to(model.gpus[0] if hasattr(model, 'gpus') else DEV)
-    torch.cuda.synchronize()
+    # torch.cuda.synchronize()
 
     cache = {'past': None}
 
@@ -395,7 +403,7 @@ def benchmark(model, input_ids, check=False):
         for i in range(input_ids.numel()):
             tick = time.time()
             out = model(input_ids[:, i:i + 1], past_key_values=cache['past'], attention_mask=attention_mask[:, :(i + 1)].reshape((1, -1)))
-            sync()
+            # sync()
             times.append(time.time() - tick)
             print(i, times[-1])
             max_memory = max(max_memory, torch.cuda.memory_allocated() / 1024 / 1024)
@@ -403,7 +411,8 @@ def benchmark(model, input_ids, check=False):
                 tot += loss(out.logits[0].to(DEV), input_ids[:, (i + 1)].to(DEV)).float()
             cache['past'] = list(out.past_key_values)
             del out
-        sync()
+        # sync()
+        import numpy as np
         print('Median:', np.median(times))
         if check:
             print('PPL:', torch.exp(tot / (input_ids.numel() - 1)).item())
@@ -449,6 +458,8 @@ if __name__ == '__main__':
     else:
         model = get_llama(args.model)
         model.eval()
+    
+    model = model.float()
 
     dataloader, testloader = get_loaders(args.dataset, nsamples=args.nsamples, seed=args.seed, model=args.model, seqlen=model.seqlen)
 
