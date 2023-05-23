@@ -325,7 +325,7 @@ class QuantLinear(nn.Module):
 
     def pack(self, linear, scales, zeros, g_idx=None):
         self.g_idx = g_idx.clone() if g_idx is not None else self.g_idx
-        if torch.max(zeros) is 0 and torch.min(zeros) is 0:
+        if torch.max(zeros) == 0 and torch.min(zeros) == 0:
             q40 = True
         else:
             q40 = False
