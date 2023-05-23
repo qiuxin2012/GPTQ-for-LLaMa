@@ -25,7 +25,7 @@ def get_llama(model):
 
 
 @torch.no_grad()
-def llama_sequential(model, dataloader, dev):
+def llama_sequential(model, dataloader, dev, q40=False):
     print('Starting ...')
 
     use_cache = model.config.use_cache
@@ -95,7 +95,7 @@ def llama_sequential(model, dataloader, dev):
             gptq = {}
             for name in subset:
                 gptq[name] = GPTQ(subset[name], observe=args.observe)
-                gptq[name].quantizer.configure(args.wbits, perchannel=True, sym=args.sym, mse=False)
+                gptq[name].quantizer.configure(args.wbits, perchannel=True, sym=args.sym, mse=False, q40=q40)
 
             print("1.1:" + str(time.time() - s1)) # 0.005s / 141.4s
             def add_batch(name):
@@ -440,6 +440,7 @@ if __name__ == '__main__':
     parser.add_argument('--sym', action='store_true', help='Whether to perform symmetric quantization.')
     parser.add_argument('--act-order', action='store_true', help='Whether to apply the activation order GPTQ heuristic')
     parser.add_argument('--true-sequential', action='store_true', help='Whether to run in true sequential model.')
+    parser.add_argument('--q40', action='store_true', help='Whether to use q_4_0 layer, default is q_4_1 layout.')
     parser.add_argument('--new-eval', action='store_true', help='Whether to use the new PTB and C4 eval')
     parser.add_argument('--observe',
                         action='store_true',
@@ -464,7 +465,7 @@ if __name__ == '__main__':
 
     if not args.load and args.wbits < 16 and not args.nearest:
         tick = time.time()
-        quantizers = llama_sequential(model, dataloader, DEV)
+        quantizers = llama_sequential(model, dataloader, DEV, args.q40)
         print(time.time() - tick)
 
     if args.benchmark:
