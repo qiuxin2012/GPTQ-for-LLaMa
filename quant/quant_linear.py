@@ -303,12 +303,13 @@ class QuantLinearFunction(torch.autograd.Function):
 
 class QuantLinear(nn.Module):
 
-    def __init__(self, bits, groupsize, infeatures, outfeatures, bias):
+    def __init__(self, bits, groupsize, infeatures, outfeatures, bias, q40=False):
         super().__init__()
         if bits not in [2, 4, 8]:
             raise NotImplementedError("Only 2,4,8 bits are supported.")
         self.infeatures = infeatures
         self.outfeatures = outfeatures
+        self.q40 = q40
         self.bits = bits
         self.maxq = 2**self.bits - 1
         self.groupsize = groupsize if groupsize != -1 else infeatures
@@ -335,7 +336,12 @@ class QuantLinear(nn.Module):
 
         intweight = []
         for idx in range(self.infeatures):
-            intweight.append(torch.round((linear.weight.data[:, idx] + self.scale_zeros[self.g_idx[idx]]) / self.scales[self.g_idx[idx]]).to(torch.int)[:, None])
+            if self.q40:
+                intweight.append(torch.round(
+                    (linear.weight.data[:, idx] / self.scales[self.g_idx[idx]] + 8)).to(
+                    torch.int)[:, None])
+            else:
+                intweight.append(torch.round((linear.weight.data[:, idx] + self.scale_zeros[self.g_idx[idx]]) / self.scales[self.g_idx[idx]]).to(torch.int)[:, None])
         intweight = torch.cat(intweight, dim=1)
         intweight = intweight.t().contiguous()
         intweight = intweight.numpy().astype(np.uint32)

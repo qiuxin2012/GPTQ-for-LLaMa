@@ -12,8 +12,12 @@ class Quantizer(nn.Module):
         self.register_buffer('scale', torch.zeros(shape))
         self.register_buffer('zero', torch.zeros(shape))
 
-    def configure(self, bits, perchannel=False, sym=True, mse=False, norm=2.4, grid=100, maxshrink=.8, trits=False):
+    def configure(self, bits, perchannel=False, sym=True, mse=False, norm=2.4, grid=100, maxshrink=.8, trits=False, q40=False):
 
+        self.q40 = q40
+        if q40:
+            assert bits == 4
+            assert trits == False
         self.maxq = torch.tensor(2**bits - 1)
         self.perchannel = perchannel
         self.sym = sym
@@ -26,10 +30,14 @@ class Quantizer(nn.Module):
         self.scale = torch.zeros_like(self.scale)
 
     def _quantize(self, x, scale, zero, maxq):
-        if maxq < 0:
-            return (x > scale / 2).float() * scale + (x < zero / 2).float() * zero
-        q = torch.clamp(torch.round(x / scale) + zero, 0, maxq)
-        return scale * (q - zero)
+        if self.q40:
+            q = torch.clamp(torch.round(x / scale) + 8, 0, maxq)
+            return scale * (q - 8)
+        else:
+            if maxq < 0:
+                return (x > scale / 2).float() * scale + (x < zero / 2).float() * zero
+            q = torch.clamp(torch.round(x / scale) + zero, 0, maxq)
+            return scale * (q - zero)
 
     def find_params(self, x, weight=False):
         dev = x.device
@@ -67,13 +75,18 @@ class Quantizer(nn.Module):
             self.scale = xmax
             self.zero = xmin
         else:
-            self.scale = (xmax - xmin) / self.maxq
-            if self.sym:
-                self.zero = torch.full_like(self.scale, (self.maxq + 1) / 2)
+            if self.q40:
+                self.scale = xmax / 7   # scale is delta
+                self.zero = torch.full_like(self.scale, 0)
             else:
-                self.zero = torch.round(-xmin / self.scale)
+                self.scale = (xmax - xmin) / self.maxq
+                if self.sym:
+                    self.zero = torch.full_like(self.scale, (self.maxq + 1) / 2)
+                else:
+                    self.zero = torch.round(-xmin / self.scale)
 
         if self.mse:
+            assert not self.q40
             best = torch.full([x.shape[0]], float('inf'), device=dev)
             for i in range(int(self.maxshrink * self.grid)):
                 p = 1 - i / self.grid
@@ -97,13 +110,13 @@ class Quantizer(nn.Module):
             else:
                 tmp = shape[1] if len(shape) != 3 else shape[2]
             self.scale = self.scale.repeat(tmp)
-            self.zero = self.zero.repeat(tmp)
+            if not self.q40:
+                self.zero = self.zero.repeat(tmp)
 
         if weight:
             shape = [-1] + [1] * (len(shape) - 1)
             self.scale = self.scale.reshape(shape)
             self.zero = self.zero.reshape(shape)
-            return
         if len(shape) == 4:
             self.scale = self.scale.reshape((1, -1, 1, 1))
             self.zero = self.zero.reshape((1, -1, 1, 1))
