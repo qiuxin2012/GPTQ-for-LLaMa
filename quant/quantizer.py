@@ -117,6 +117,7 @@ class Quantizer(nn.Module):
             shape = [-1] + [1] * (len(shape) - 1)
             self.scale = self.scale.reshape(shape)
             self.zero = self.zero.reshape(shape)
+            return
         if len(shape) == 4:
             self.scale = self.scale.reshape((1, -1, 1, 1))
             self.zero = self.zero.reshape((1, -1, 1, 1))
