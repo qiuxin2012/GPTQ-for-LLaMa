@@ -316,6 +316,7 @@ class QuantLinear(nn.Module):
         self.register_buffer('qweight', torch.zeros((infeatures // 32 * self.bits, outfeatures), dtype=torch.int32))
         self.register_buffer('qzeros', torch.zeros((math.ceil(infeatures / self.groupsize), outfeatures // 32 * self.bits), dtype=torch.int32))
         self.register_buffer('scales', torch.zeros((math.ceil(infeatures / self.groupsize), outfeatures), dtype=torch.float16))
+        self.register_buffer('scale_zeros', torch.zeros((math.ceil(infeatures / self.groupsize), outfeatures), dtype=torch.float32))
         self.register_buffer('g_idx', torch.tensor([i // self.groupsize for i in range(infeatures)], dtype=torch.int32))
         if bias:
             self.register_buffer('bias', torch.zeros((outfeatures), dtype=torch.float16))
@@ -324,17 +325,26 @@ class QuantLinear(nn.Module):
 
     def pack(self, linear, scales, zeros, g_idx=None):
         self.g_idx = g_idx.clone() if g_idx is not None else self.g_idx
+        if torch.max(zeros) == 0 and torch.min(zeros) == 0:
+            q40 = True
+        else:
+            q40 = False
 
         scales = scales.t().contiguous()
         zeros = zeros.t().contiguous()
-        scale_zeros = zeros * scales
+        self.scale_zeros = zeros * scales
         self.scales = scales.clone().half()
         if linear.bias is not None:
             self.bias = linear.bias.clone().half()
 
         intweight = []
         for idx in range(self.infeatures):
-            intweight.append(torch.round((linear.weight.data[:, idx] + scale_zeros[self.g_idx[idx]]) / self.scales[self.g_idx[idx]]).to(torch.int)[:, None])
+            if q40:
+                intweight.append(torch.round(
+                    (linear.weight.data[:, idx] / self.scales[self.g_idx[idx]] + 8)).to(
+                    torch.int)[:, None])
+            else:
+                intweight.append(torch.round((linear.weight.data[:, idx] + self.scale_zeros[self.g_idx[idx]]) / self.scales[self.g_idx[idx]]).to(torch.int)[:, None])
         intweight = torch.cat(intweight, dim=1)
         intweight = intweight.t().contiguous()
         intweight = intweight.numpy().astype(np.uint32)
